@@ -26,9 +26,3 @@ Here are some useful references related to the Bradley-Terry model and its appli
 - **Quasi-variances**: [Oxford Academic](https://academic.oup.com/biomet/article/91/1/65/218766)
 - **Bias Reduction of Maximum Likelihood Estimates**: [JSTOR](https://www.jstor.org/stable/2336755?origin=JSTOR-pdf)
 - **An Introduction to Categorical Data Analysis**: [UF Statistics](https://users.stat.ufl.edu/~aa/)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-
