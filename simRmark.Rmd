@@ -1,0 +1,204 @@
+---
+title: "Simulazione Bradley-Terry"
+author: "Marco Scapin"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+rm(list = ls())
+library('BradleyTerry2')
+library('plyr')
+```
+
+
+```{r include=FALSE}
+# creazione matrice torneo
+rankingD <- function(n) {
+  m <- choose(n, 2)
+  D <- matrix(0, m, n - 1)
+  indeces <- cbind(1:m, t(combn(1:n, 2)) -1)
+  D <- replace(D, indeces[indeces[, 2] > 0, c(1, 2)], 1)
+  replace(D, indeces[, c(1, 3)], -1)
+}
+
+# resize del torneo: rimozione incontri
+matchResize <- function(mat, n) {
+  row <- sample(1:nrow(mat), n,replace = F)
+  mat[row,] <- 0
+  return(mat)
+}
+
+simOne <- function(ability, rankingMatrix, nplayers, biasReduced) {
+  # vettore differenze delle abilita nei match
+  ability_diff <- rankingMatrix %*% ability
+  # vettore delle probabilita
+  prob_vector <- as.vector(exp(ability_diff) / (1 + exp(ability_diff))) 
+  # simulazione dei match tramite vettore delle probabilita
+  match_res <- rbinom(n = length(prob_vector), size = 1, prob = prob_vector) 
+  # Creo Matrice di contingenza per utilizzare la funzione countsToBinomial
+  cont_matrix <- matrix(0, nplayers, nplayers)
+  z <- 1
+  for (i in 1:nrow(rankingMatrix)) {
+    first_player <- which(rankingMatrix[i,] == 1)
+    second_player <- which(rankingMatrix[i,] == -1)
+    if (length(first_player) == 0) {
+      # ultimo giocatore non presente nella matrice del torneo 
+      first_player <- 20
+    }
+    
+    if(match_res[z] == 1){
+      # il player1 e' vincitore
+      cont_matrix[first_player, second_player] <- cont_matrix[first_player, second_player] + 1
+    } else {
+      # il player1 e' vincitore
+      cont_matrix[second_player, first_player] <- cont_matrix[second_player, first_player] + 1 
+    }
+    z <- z+1
+  }
+  # rinomino righe/colonne
+  colnames(cont_matrix) <- 1:nplayers
+  row.names(cont_matrix) <- 1:nplayers
+  # Fit del modello
+  counts_bin <- countsToBinomial(cont_matrix) 
+  model <- try(BTm(outcome = cbind(win1, win2), 
+                   player1 = player1, player2 = player2, 
+                   formula = ~ player, id = "player", 
+                   data = counts_bin, br = biasReduced))
+  if (inherits(model, "try-error")){
+	  return (rep(NA, nplayers - 1))
+  }
+  else{
+	  return (model$coefficient)
+  }
+}
+
+```
+
+
+
+# Risultati simulazione senza bias reduced:
+
+Ogni boxplot rappresenta una dimensione del torneo, nelle y abbiamo il valore del MSE e invece nelle x sono riportate le differenza delle abilita stimate : avendo 19 giocatori e 500 simulazioni dovrei ottenere sempre 19*500 = 9500 stime, pero con riduzioni elevate alcune differenze non vengono stimate (in realta non vengono stimate le abilita dei giocatori che sono NA e poi quindi trasformano in NA tutta le differenze) e contengono valori NA, cosi per mostrare il boxplot sono state messe a zero le stime delle abilita di alcuni giocatori.
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+#################################### Simulazione senza bias reduced ####################################
+set.seed(123)
+nplayers <- 20
+# simulazione vettore abilita iniziali
+ability <- rnorm(n = nplayers-1)
+# creazione matrice torneo
+rankingMatrix <- rankingD(nplayers)
+# numero di simulazioni
+sim <- 500 
+
+# simulazione 1: Matrice torneo completa senza bias reduced 
+coefficients <- replicate(sim, simOne(ability, rankingMatrix, nplayers, FALSE))
+# quante differenze e riuscito a stimare 
+tot_estimate <- length(coefficients[!is.na(coefficients)])
+# rimuovo eventuali NA 
+coefficients[is.na(coefficients)] <- 0
+# calcolo stima delle differenze tra le abilita
+hat_deltaij <- rankingMatrix %*%  coefficients
+# calcolo reali differenze tra le abilita
+deltaij <- rankingMatrix %*% ability
+# calcolo errore quadratico medio
+se <- apply(hat_deltaij, 2, function(x) {return((x-deltaij)^2)})
+mse <- apply(se, 2, mean)
+
+## BoxPlot dell'errore quadratico medio
+boxplot(mse, main="Torneo completo", ylab="MSE", col='steelblue', border="brown", xlab=paste("Tot differenze stimate", toString(tot_estimate), sep=" "))
+##
+
+# riduzione del torneo: 20% 40% 60% 80%
+m <- nrow(rankingMatrix)
+reduction <- c(m*20/100, m*40/100, m*60/100, m*80/100)
+#
+
+main_title <- c("Torneo ridotto 20%", "Torneo ridotto 40%", "Torneo ridotto 60%", "Torneo ridotto 80%")
+j <- 1
+for(i in reduction){
+  # riduzione matrice torneo
+  rankingMatrix <- matchResize(rankingMatrix, i)
+  # simulazione
+  coefficients <- replicate(sim, simOne(ability, rankingMatrix, nplayers, FALSE))
+  # quante differenze e riuscito a stimare 
+  tot_estimate <- length(coefficients[!is.na(coefficients)])
+  # rimuovo eventuali NA 
+  coefficients[is.na(coefficients)] <- 0
+  # calcolo stima delle differenze tra le abilita
+  hat_deltaij <- rankingMatrix %*%  coefficients
+  # calcolo errore quadratico medio
+  se <- apply(hat_deltaij, 2, function(x) {return((x-deltaij)^2)})
+  mse <- apply(se, 2, mean)
+  # Boxplot per mse stimato
+  boxplot(mse, main=main_title[j], ylab="MSE", col='steelblue', border="brown", xlab=paste("Tot differenze stimate", toString(tot_estimate), sep=" "))
+  j <- j+1
+}
+
+```
+
+
+
+
+# Risultati simulazione con  bias reduced:
+
+Ogni boxplot rappresenta una dimensione del torneo, nelle y abbiamo il valore del MSE e invece nelle x sono riportate le differenza delle abilita stimate : avendo 19 giocatori e 500 simulazioni dovrei ottenere sempre 19*500 = 9500 stime, pero con riduzioni elevate alcune differenze non vengono stimate (in realta non vengono stimate le abilita dei giocatori che sono NA e poi quindi trasformano in NA tutta le differenze) e contengono valori NA, cosi per mostrare il boxplot sono state messe a zero le stime delle abilita di alcuni giocatori.
+```{r echo=FALSE, message=FALSE, warning=FALSE, , error=FALSE}
+
+#################################### Simulazione con bias reduced ####################################
+set.seed(123)
+nplayers <- 20
+# simulazione vettore abilita iniziali
+ability <- rnorm(n = nplayers-1)
+# creazione matrice torneo
+rankingMatrix <- rankingD(nplayers)
+# numero di simulazioni
+sim <- 500 
+
+# simulazione 1: Matrice torneo completa senza bias reduced 
+coefficients <- replicate(sim, simOne(ability, rankingMatrix, nplayers, TRUE))
+# quante differenze e riuscito a stimare 
+tot_estimate <- length(coefficients[!is.na(coefficients)])
+# rimuovo eventuali NA 
+coefficients[is.na(coefficients)] <- 0
+# calcolo stima delle differenze tra le abilita
+hat_deltaij <- rankingMatrix %*%  coefficients
+# calcolo reali differenze tra le abilita
+deltaij <- rankingMatrix %*% ability
+# calcolo errore quadratico medio
+se <- apply(hat_deltaij, 2, function(x) {return((x-deltaij)^2)})
+mse <- apply(se, 2, mean)
+
+## BoxPlot dell'errore quadratico medio
+boxplot(mse, main="Torneo completo", ylab="MSE", col='steelblue', border="brown", xlab=paste("Tot differenze stimate", toString(tot_estimate), sep=" "))
+##
+
+# riduzione del torneo: 20% 40% 60% 80%
+m <- nrow(rankingMatrix)
+reduction <- c(m*20/100, m*40/100, m*60/100, m*80/100)
+#
+
+main_title <- c("Torneo ridotto 20%", "Torneo ridotto 40%", "Torneo ridotto 60%", "Torneo ridotto 80%")
+j <- 1
+for(i in reduction){
+  # riduzione matrice torneo
+  rankingMatrix <- matchResize(rankingMatrix, i)
+  # simulazione
+  coefficients <- replicate(sim, simOne(ability, rankingMatrix, nplayers, TRUE))
+  # quante differenze e riuscito a stimare 
+  tot_estimate <- length(coefficients[!is.na(coefficients)])
+  # rimuovo eventuali NA 
+  coefficients[is.na(coefficients)] <- 0
+  # calcolo stima delle differenze tra le abilita
+  hat_deltaij <- rankingMatrix %*%  coefficients
+  # calcolo errore quadratico medio
+  se <- apply(hat_deltaij, 2, function(x) {return((x-deltaij)^2)})
+  mse <- apply(se, 2, mean)
+  # Boxplot per mse stimato
+  boxplot(mse, main=main_title[j], ylab="MSE", col='steelblue', border="brown", xlab=paste("Tot differenze stimate", toString(tot_estimate), sep=" "))
+  j <- j+1
+}
+```
+
+
+
+
